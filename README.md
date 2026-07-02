@@ -77,7 +77,7 @@ bash scripts/backup.sh
 
 ## Prerequisites
 
-- Helm 3
+- Helm
 - A Kubernetes cluster with `gateway.networking.k8s.io` CRDs and a provisioned Gateway (the MicroK8s `ingress` addon satisfies both, providing a `traefik-gateway` Gateway in the `ingress` namespace)
 - A StorageClass for the data PVCs (defaults to `ceph-rbd`; set `persistence.books.storageClass`, `persistence.data.storageClass`, and `postgres.persistence.storageClass` to use a different one)
 - A kubeconfig pointing at the cluster. If you're running Helm from a machine that is not a cluster node, copy the kubeconfig from any node and replace the loopback address with the node's LAN IP or host name. If your cluster node user is `ubuntu` and a node is `node-01.local`:
