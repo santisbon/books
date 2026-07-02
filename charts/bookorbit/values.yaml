@@ -44,11 +44,16 @@ config:
   appUrl: ""
   logLevel: info
   # Node.js heap limit in MB. On 4 GiB Raspberry Pis the default of 2048 allows
-  # Node.js to consume enough memory during large PDF processing to trigger the
-  # kernel OOM killer, which starves the Ceph OSD of memory and causes it to
-  # lose its monitor heartbeat and go down. 1024 keeps the heap well under the
-  # container memory limit below.
-  nodeMaxOldSpaceSize: 1024
+  # Node.js to consume enough memory during large PDF/metadata processing to
+  # trigger the kernel OOM killer, which starves the Ceph OSD of memory and
+  # causes it to lose its monitor heartbeat and go down. 512 keeps the heap
+  # well under the container memory limit below, leaving room for the
+  # ffmpeg/ffprobe child processes metadata embedding spawns in the same
+  # cgroup. (Previously 1024/1536Mi: that pairing let the process reach only
+  # ~622MB RSS before a global, node-wide OOM hit first — node-02's Ceph
+  # daemons run outside Kubernetes and aren't reserved for in kubelet's
+  # accounting, so real headroom is much less than the limit implied.)
+  nodeMaxOldSpaceSize: 512
 
 # Credentials. Set at install time with --set or -f my-values.yaml.
 # Do not commit values containing these to source control.
@@ -105,12 +110,15 @@ cloudflare:
 
 # Without limits this pod runs as BestEffort (oom_score_adj=1000), making it
 # the first thing the kernel kills under memory pressure. On 4 GiB Pis, large
-# PDF saves push Node.js past ~1.4 GiB RSS, causing system-wide OOM that
-# disrupts the Ceph OSD on the same node. A container-level limit causes a
-# clean pod restart instead of system OOM, keeping the OSD unaffected.
+# PDF/metadata saves push Node.js's RSS up, and node-02's Ceph mon/mgr/osd
+# daemons run outside Kubernetes (not reserved for in kubelet's allocatable
+# accounting), so real free memory is well below what the node reports as
+# available. 768Mi keeps this container's own cgroup limit as the thing that
+# trips a memory spike (clean OOMKilled + pod restart) instead of a node-wide
+# OOM that can take out the Ceph OSD sharing the box.
 resources:
   limits:
-    memory: 1536Mi  # headroom above nodeMaxOldSpaceSize (1 GiB heap + overhead)
+    memory: 768Mi  # headroom above nodeMaxOldSpaceSize (512Mi heap + overhead)
   requests:
     cpu: 250m
     memory: 512Mi

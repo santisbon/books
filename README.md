@@ -38,8 +38,10 @@ You can install the chart from source, publish to your own registry and install 
 ```bash
 bash scripts/gen-secrets.sh
 
+VERSION= # choose a version to deploy
+
 helm upgrade --install bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
-  --version 0.1.0 \
+  --version $VERSION \
   --namespace bookorbit --create-namespace \
   --set config.appUrl="https://books.internal" \
   --set 'httpRoute.hostnames[0]=books.internal' \
@@ -52,7 +54,7 @@ helm upgrade --install bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
 For access from the internet you can use a Cloudflare Tunnel and your own domain:
 ```sh
 helm upgrade --install bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
-  --version 0.1.0 \
+  --version $VERSION \
   --namespace bookorbit --create-namespace \
   --set config.appUrl=https://$APP_DOMAIN \
   --set 'httpRoute.hostnames[0]=books.internal' \
@@ -202,7 +204,7 @@ curl -s http://node-01.local:32000/v2/_catalog | jq
 curl -s http://node-01.local:32000/v2/charts/bookorbit/tags/list | jq
 
 # Inspect chart metadata for a specific version
-helm show chart oci://node-01.local:32000/charts/bookorbit --version 0.1.0 --plain-http
+helm show chart oci://node-01.local:32000/charts/bookorbit --version $VERSION --plain-http
 ```
 
 Install directly from it:
@@ -210,7 +212,7 @@ Install directly from it:
 *To make BookOrbit available from the internet, see `CLOUDFLARE.md`.*
 ```bash
 helm upgrade --install bookorbit oci://node-01.local:32000/charts/bookorbit \
-  --version 0.1.0 --plain-http \
+  --version $VERSION --plain-http \
   --namespace bookorbit --create-namespace \
   --set config.appUrl="http://books.internal" \
   --set 'httpRoute.hostnames[0]=books.internal' \
@@ -264,7 +266,7 @@ curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
 Inspect chart metadata for a specific version (works with either auth method):
 
 ```bash
-helm show chart oci://ghcr.io/<github-user>/charts/bookorbit --version 0.1.0
+helm show chart oci://ghcr.io/<github-user>/charts/bookorbit --version $VERSION
 ```
 
 Install:
@@ -272,7 +274,7 @@ Install:
 *To make BookOrbit available from the internet, see `CLOUDFLARE.md`.*
 ```bash
 helm upgrade --install bookorbit oci://ghcr.io/<github-user>/charts/bookorbit \
-  --version 0.1.0 \
+  --version $VERSION \
   --namespace bookorbit --create-namespace \
   --set config.appUrl="http://books.internal" \
   --set 'httpRoute.hostnames[0]=books.internal' \

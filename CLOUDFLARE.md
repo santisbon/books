@@ -146,18 +146,20 @@ After packaging the chart and pushing it to the desired registry:
 CHART="oci://node-01.local:32000/charts/bookorbit"
 # or from the GHCR
 CHART="oci://ghcr.io/<github-user>/charts/bookorbit"
+VERSION= # choose a version to deploy
 ```
 
 ```sh
 echo $CHART
 echo $TUNNEL_ID
 echo $APP_DOMAIN
+echo $VERSION
 ```
 
 *Add `--plain-http` for MicroK8s*
 ```sh
 helm upgrade --install bookorbit $CHART \
-  --version 0.1.0 \
+  --version $VERSION \
   --namespace bookorbit --create-namespace \
   --set cloudflare.enabled=true \
   --set cloudflare.tunnelId=$TUNNEL_ID \
