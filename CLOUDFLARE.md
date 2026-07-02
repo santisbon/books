@@ -2,6 +2,25 @@
 
 This document explains how the Cloudflare Tunnel integration works, how it relates to the existing local-network access path, and how to reason about both. When discussing a deployment environment it uses a 3-node Raspberry Pi cluster as an example.
 
+## Table of Contents
+
+- [What Cloudflare Tunnel does](#what-cloudflare-tunnel-does)
+- [Deployment design](#deployment-design)
+  - [Why 2 replicas, not a DaemonSet](#why-2-replicas-not-a-daemonset)
+  - [Pod anti-affinity](#pod-anti-affinity)
+- [The two access paths](#the-two-access-paths)
+  - [Path 1 — Local network (HTTPRoute + Traefik)](#path-1--local-network-httproute--traefik)
+  - [Path 2 — Internet (Cloudflare Tunnel)](#path-2--internet-cloudflare-tunnel)
+- [Implications of running both paths](#implications-of-running-both-paths)
+- [Unifying the two paths](#unifying-the-two-paths)
+- [Setup steps](#setup-steps)
+  - [1. Prerequisites](#1-prerequisites)
+  - [2. Create the tunnel and Kubernetes Secret](#2-create-the-tunnel-and-kubernetes-secret)
+  - [3. Install / upgrade the Helm chart](#3-install--upgrade-the-helm-chart)
+  - [4. Verify](#4-verify)
+  - [5. (Recommended) Lock it down with Cloudflare Access](#5-recommended-lock-it-down-with-cloudflare-access)
+- [Glossary](#glossary)
+
 ---
 
 ## What Cloudflare Tunnel does
