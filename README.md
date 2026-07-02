@@ -363,6 +363,8 @@ bash scripts/backup.sh
 
 Backups are written to `s3://<bucket>/bookorbit/<timestamp>/` as three gzip-compressed archives: `postgres.sql.gz`, `books.tar.gz`, and `data.tar.gz`.
 
+**CPU/IO priority:** the `/books` and `/data` archives are captured by `tar`/`gzip` running *inside* the BookOrbit container via `kubectl exec`, sharing its CPU and memory limits. On constrained nodes, compressing a large library at full priority can starve the app of CPU long enough to fail its health checks and get restarted mid-backup. If the underlying storage is Ceph RBD (as in this chart), the node also runs the kernel RBD client for that volume, which must periodically renew a heartbeat ("watch") with the Ceph OSDs to keep its session alive. The same CPU starvation can delay that renewal, causing Ceph to blocklist the client and produce spurious I/O errors on the mount until it's reset. To avoid this, the script runs those `tar` invocations under `nice -n 19` (lowest CPU priority) and, if available in the container image, `ionice -c3` (best-effort/idle IO class). This way the backup only uses resources the app isn't currently using, at the cost of taking longer under load.
+
 To list all backups or inspect a specific one:
 
 ```bash

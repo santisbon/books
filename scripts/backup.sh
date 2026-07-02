@@ -37,14 +37,16 @@ kubectl exec -n "$NAMESPACE" deploy/bookorbit-postgres \
   | gzip \
   | $S3CP - "s3://$BUCKET/$PREFIX/postgres.sql.gz"
 
+NICE_TAR='IONICE=""; command -v ionice >/dev/null 2>&1 && IONICE="ionice -c3"; exec nice -n 19 $IONICE tar'
+
 echo "→ /books..."
 kubectl exec -n "$NAMESPACE" deploy/bookorbit \
-  -- tar czf - -C / --exclude=lost+found books \
+  -- sh -c "$NICE_TAR czf - -C / --exclude=lost+found books" \
   | $S3CP - "s3://$BUCKET/$PREFIX/books.tar.gz"
 
 echo "→ /data..."
 kubectl exec -n "$NAMESPACE" deploy/bookorbit \
-  -- tar czf - -C / --exclude=lost+found data \
+  -- sh -c "$NICE_TAR czf - -C / --exclude=lost+found data" \
   | $S3CP - "s3://$BUCKET/$PREFIX/data.tar.gz"
 
 echo "Done. Backup stored at s3://$BUCKET/$PREFIX/"
