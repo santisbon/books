@@ -1,0 +1,139 @@
+image:
+  repository: ghcr.io/bookorbit/bookorbit
+  pullPolicy: IfNotPresent
+  tag: "2.0.1"
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+# User and group the BookOrbit process runs as inside the container.
+# Change these if your media files are owned by a different uid/gid.
+# fsGroup is set to pgid automatically so Kubernetes chowns mounted
+# volumes to the right group before the container starts.
+process:
+  puid: 1000
+  pgid: 1000
+
+service:
+  type: ClusterIP
+  port: 3000
+
+# Gateway API HTTPRoute. MicroK8s ingress addon provisions a Traefik-based
+# Gateway named "traefik-gateway" in the "ingress" namespace.
+httpRoute:
+  enabled: true
+  annotations: {}
+  parentRefs:
+    - name: traefik-gateway
+      namespace: ingress
+  hostnames: []
+  # - books.node-01.local
+
+# Application config
+config:
+  # Required: full URL where BookOrbit will be accessed (e.g. http://books.node-01.local)
+  appUrl: ""
+  logLevel: info
+  # Node.js heap limit in MB. On 4 GiB Raspberry Pis the default of 2048 allows
+  # Node.js to consume enough memory during large PDF processing to trigger the
+  # kernel OOM killer, which starves the Ceph OSD of memory and causes it to
+  # lose its monitor heartbeat and go down. 1024 keeps the heap well under the
+  # container memory limit below.
+  nodeMaxOldSpaceSize: 1024
+
+# Credentials. Set at install time with --set or -f my-values.yaml.
+# Do not commit values containing these to source control.
+credentials:
+  postgresPassword: ""
+  jwtSecret: ""
+  setupBootstrapToken: ""
+  # Name of a pre-existing Secret to use instead of creating one.
+  # Must contain keys: postgres-password, jwt-secret, setup-bootstrap-token
+  existingSecret: ""
+
+# Bundled PostgreSQL. Uses pgvector/pgvector:pg16 to satisfy the vector
+# extension requirement. Set enabled=false to use an external database.
+postgres:
+  enabled: true
+  image:
+    repository: pgvector/pgvector
+    tag: pg16
+    pullPolicy: IfNotPresent
+  user: bookorbit
+  database: bookorbit
+  port: 5432
+  # host is only used when postgres.enabled=false
+  host: ""
+  persistence:
+    storageClass: "ceph-rbd"
+    size: 5Gi
+    existingClaim: ""
+
+persistence:
+  books:
+    storageClass: "ceph-rbd"
+    size: 10Gi
+    existingClaim: ""
+  data:
+    storageClass: "ceph-rbd"
+    size: 1Gi
+    existingClaim: ""
+
+cloudflare:
+  enabled: false
+  # ID of the tunnel created with: cloudflared tunnel create bookorbit
+  tunnelId: ""
+  # Public hostname to expose, e.g. books.yourdomain.com
+  hostname: ""
+  # Name of a pre-existing Secret containing credentials.json from:
+  #   kubectl create secret generic <name> \
+  #     --from-file=credentials.json=~/.cloudflare/tunnels/<tunnel-id>.json
+  credentialsSecret: "cloudflared-credentials"
+  image:
+    # Pin to a specific release; check https://github.com/cloudflare/cloudflared/releases
+    tag: "2026.6.1"
+    pullPolicy: IfNotPresent
+
+# Without limits this pod runs as BestEffort (oom_score_adj=1000), making it
+# the first thing the kernel kills under memory pressure. On 4 GiB Pis, large
+# PDF saves push Node.js past ~1.4 GiB RSS, causing system-wide OOM that
+# disrupts the Ceph OSD on the same node. A container-level limit causes a
+# clean pod restart instead of system OOM, keeping the OSD unaffected.
+resources:
+  limits:
+    memory: 1536Mi  # headroom above nodeMaxOldSpaceSize (1 GiB heap + overhead)
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /api/v1/health
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /api/v1/health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

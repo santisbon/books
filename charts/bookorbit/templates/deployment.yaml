@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bookorbit.fullname" . }}
+  labels:
+    {{- include "bookorbit.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # Recreate is required: both PVCs use ReadWriteOnce and cannot be shared
+  # across pods.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "bookorbit.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "bookorbit.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: {{ .Values.process.pgid }}
+        {{- with .Values.podSecurityContext }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: PUID
+              value: {{ .Values.process.puid | quote }}
+            - name: PGID
+              value: {{ .Values.process.pgid | quote }}
+            - name: APP_URL
+              value: {{ required "config.appUrl is required" .Values.config.appUrl | quote }}
+            - name: POSTGRES_HOST
+              value: {{ include "bookorbit.postgresHost" . | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bookorbit.secretName" . }}
+                  key: postgres-password
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bookorbit.secretName" . }}
+                  key: jwt-secret
+            - name: SETUP_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bookorbit.secretName" . }}
+                  key: setup-bootstrap-token
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: NODE_MAX_OLD_SPACE_SIZE
+              value: {{ .Values.config.nodeMaxOldSpaceSize | quote }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: books
+              mountPath: /books
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: books
+          persistentVolumeClaim:
+            claimName: {{ include "bookorbit.pvcBooks" . }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "bookorbit.pvcData" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

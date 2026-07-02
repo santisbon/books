@@ -1,0 +1,12 @@
+# Copy this file to backup-config.yaml and fill in your values.
+# backup-config.yaml is gitignored. Do not commit it.
+# Credentials and endpoint are read from the named profile in ~/.aws/config and ~/.aws/credentials.
+
+# AWS CLI profile to use.
+profile: "homelab"
+
+# S3 bucket to store backups in (created automatically if it doesn't exist).
+bucket: "bookorbit-backups"
+
+# Kubernetes namespace where bookorbit is deployed.
+namespace: "bookorbit"

@@ -1,0 +1,15 @@
+{{- if not .Values.persistence.books.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "bookorbit.fullname" . }}-books
+  labels:
+    {{- include "bookorbit.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.persistence.books.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.books.size }}
+{{- end }}

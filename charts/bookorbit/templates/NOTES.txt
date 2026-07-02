@@ -1,0 +1,43 @@
+BookOrbit has been deployed.
+
+{{- if .Values.httpRoute.enabled }}
+
+Access via HTTPRoute:
+{{- if .Values.httpRoute.hostnames }}
+  {{- range .Values.httpRoute.hostnames }}
+  http://{{ . }}
+  {{- end }}
+{{- else }}
+  No hostnames configured. The HTTPRoute will match all hostnames accepted
+  by the parent Gateway(s):
+  {{- range .Values.httpRoute.parentRefs }}
+    Gateway: {{ .name }}{{ if .namespace }}/{{ .namespace }}{{ end }}
+  {{- end }}
+{{- end }}
+
+{{- end }}
+
+{{- if .Values.cloudflare.enabled }}
+
+Access via Cloudflare Tunnel (internet):
+  https://{{ required "cloudflare.hostname is required when cloudflare.enabled=true" .Values.cloudflare.hostname }}
+
+{{- end }}
+
+{{- if and (not .Values.httpRoute.enabled) (not .Values.cloudflare.enabled) }}
+
+No HTTPRoute or Cloudflare Tunnel is enabled. Port-forward to reach the UI:
+
+  kubectl port-forward svc/{{ include "bookorbit.fullname" . }} 3000:3000 -n {{ .Release.Namespace }}
+
+Then open http://localhost:3000
+{{- end }}
+
+Storage:
+  Books : {{ include "bookorbit.pvcBooks" . }} ({{ .Values.persistence.books.size }}, StorageClass: {{ .Values.persistence.books.storageClass }})
+  Data  : {{ include "bookorbit.pvcData" . }} ({{ .Values.persistence.data.size }}, StorageClass: {{ .Values.persistence.data.storageClass }})
+{{- if .Values.postgres.enabled }}
+  Postgres: {{ include "bookorbit.pvcPostgres" . }} ({{ .Values.postgres.persistence.size }}, StorageClass: {{ .Values.postgres.persistence.storageClass }})
+{{- end }}
+
+On first access, complete setup using your SETUP_BOOTSTRAP_TOKEN.

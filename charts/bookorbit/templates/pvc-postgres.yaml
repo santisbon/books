@@ -1,0 +1,15 @@
+{{- if and .Values.postgres.enabled (not .Values.postgres.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "bookorbit.fullname" . }}-postgres
+  labels:
+    {{- include "bookorbit.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.postgres.persistence.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.postgres.persistence.size }}
+{{- end }}

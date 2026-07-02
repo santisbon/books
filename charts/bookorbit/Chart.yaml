@@ -1,0 +1,15 @@
+apiVersion: v2
+name: bookorbit
+description: BookOrbit, a self-hosted book management application
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - books
+  - library
+  - reading
+home: https://bookorbit.app
+sources:
+  - https://bookorbit.app
+maintainers:
+  - name: santisbon
