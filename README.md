@@ -49,6 +49,22 @@ helm upgrade --install bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
   -f my-secrets.yaml
 ```
 
+For access from the internet you can use a Cloudflare Tunnel and your own domain:
+```sh
+helm upgrade --install bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
+  --version 0.1.0 \
+  --namespace bookorbit --create-namespace \
+  --set config.appUrl=https://$APP_DOMAIN \
+  --set 'httpRoute.hostnames[0]=books.internal' \
+  --set persistence.books.storageClass=ceph-rbd \
+  --set persistence.data.storageClass=ceph-rbd \
+  --set postgres.persistence.storageClass=ceph-rbd \
+  -f my-secrets.yaml
+  --set cloudflare.enabled=true \
+  --set cloudflare.tunnelId=$TUNNEL_ID \
+  --set cloudflare.hostname=$APP_DOMAIN \
+```
+
 You can edit your `/etc/hosts` to point `books.internal` to a k8s node LAN IP for access within your local network. For access from the internet see `CLOUDFLARE.md`.
 
 To create a backup:
