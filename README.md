@@ -91,11 +91,12 @@ bash scripts/backup.sh
   export KUBECONFIG=~/.kube/microk8s.yaml
   ```
 
-  To avoid setting `KUBECONFIG` in every shell session, add the export to your `~/.bashrc` or `~/.zshrc`, or merge it into your existing `~/.kube/config`:
+  To avoid setting `KUBECONFIG` in every shell session, add the export to your `~/.bashrc` or `~/.zshrc`, or merge it into your existing `~/.kube/config`. Don't redirect the merged output directly back into `~/.kube/config`. The shell truncates that file to set up the redirect before `kubectl` runs, so `kubectl` ends up reading an already-empty file for that half of the merge and silently drops everything that was in it. Write to a temp file first, then move it into place once the merge is done:
 
   ```bash
   KUBECONFIG=~/.kube/config:~/.kube/microk8s.yaml \
-    kubectl config view --flatten > ~/.kube/config
+    kubectl config view --flatten > /tmp/kubeconfig-merged.yaml \
+    && mv /tmp/kubeconfig-merged.yaml ~/.kube/config
   ```
 
 ## Install
