@@ -1,6 +1,6 @@
 apiVersion: v2
 name: bookorbit
-description: BookOrbit, a self-hosted book management application
+description: Helm chart for BookOrbit, a self-hosted book management application
 type: application
 version: 0.1.1
 appVersion: "latest"
@@ -8,8 +8,8 @@ keywords:
   - books
   - library
   - reading
-home: https://bookorbit.app
+home: https://github.com/santisbon/books
 sources:
-  - https://bookorbit.app
+  - https://github.com/santisbon/books
 maintainers:
   - name: santisbon
