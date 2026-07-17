@@ -18,6 +18,10 @@ yaml_get() {
   grep "^${1}:" "$CONFIG" | head -1 | sed 's/^[^:]*:[[:space:]]*//' | tr -d '"' | tr -d "'"
 }
 
+# kubectl command to use; override for clusters reached via a wrapper,
+# e.g. KUBECTL=mkctl bash scripts/backup.sh  (MicroCloud cluster, no local kubeconfig)
+KUBECTL="${KUBECTL:-kubectl}"
+
 PROFILE=$(yaml_get profile)
 BUCKET=$(yaml_get bucket)
 NAMESPACE=$(yaml_get namespace)
@@ -32,7 +36,7 @@ echo "Backing up to s3://$BUCKET/$PREFIX/"
 $S3 mb "s3://$BUCKET" 2>/dev/null || true
 
 echo "→ database..."
-kubectl exec -n "$NAMESPACE" deploy/bookorbit-postgres \
+$KUBECTL exec -n "$NAMESPACE" deploy/bookorbit-postgres \
   -- pg_dump -U bookorbit bookorbit \
   | gzip \
   | $S3CP - "s3://$BUCKET/$PREFIX/postgres.sql.gz"
@@ -40,12 +44,12 @@ kubectl exec -n "$NAMESPACE" deploy/bookorbit-postgres \
 NICE_TAR='IONICE=""; command -v ionice >/dev/null 2>&1 && IONICE="ionice -c3"; exec nice -n 19 $IONICE tar'
 
 echo "→ /books..."
-kubectl exec -n "$NAMESPACE" deploy/bookorbit \
+$KUBECTL exec -n "$NAMESPACE" deploy/bookorbit \
   -- sh -c "$NICE_TAR czf - -C / --exclude=lost+found books" \
   | $S3CP - "s3://$BUCKET/$PREFIX/books.tar.gz"
 
 echo "→ /data..."
-kubectl exec -n "$NAMESPACE" deploy/bookorbit \
+$KUBECTL exec -n "$NAMESPACE" deploy/bookorbit \
   -- sh -c "$NICE_TAR czf - -C / --exclude=lost+found data" \
   | $S3CP - "s3://$BUCKET/$PREFIX/data.tar.gz"
 
