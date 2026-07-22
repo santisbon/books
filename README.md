@@ -104,7 +104,7 @@ bash scripts/backup.sh
     && mv /tmp/kubeconfig-merged.yaml ~/.kube/config
   ```
 
-  If instead you reach the cluster through a wrapper that runs `kubectl` and `helm` on a node over SSH (so there is no workstation kubeconfig at all), substitute that wrapper for `kubectl` and `helm` in every command below. `scripts/backup.sh` has a `KUBECTL` environment variable for this. Two consequences worth knowing: files referenced by `-f` must be readable *on the node running the command*, not on your workstation, so install from an OCI reference with `--reuse-values` rather than a local chart directory and a local `-f my-secrets.yaml`; and any command piping local data in (`gunzip -c ... | kubectl exec -i`) only works if the wrapper passes stdin through.
+  If instead you reach the cluster through a wrapper that runs `kubectl` and `helm` on a node over SSH (so there is no workstation kubeconfig at all), substitute that wrapper for `kubectl` and `helm` in every command below. `scripts/backup.sh` has a `KUBECTL` environment variable for this. Two consequences worth knowing: files referenced by `-f` must be readable *on the node running the command*, not on your workstation, so install from an OCI reference with `--reset-then-reuse-values` rather than a local chart directory and a local `-f my-secrets.yaml`; and any command piping local data in (`gunzip -c ... | kubectl exec -i`) only works if the wrapper passes stdin through.
 
 ## Install
 
@@ -524,7 +524,7 @@ This works because the app is at zero replicas, so the ReadWriteOnce `books` and
 
 ### Routine upgrade
 
-Most upgrades are a new BookOrbit release, which reaches you as a bumped `image.tag` default in a new chart version. `--reuse-values` carries forward everything you passed at install time, including `my-secrets.yaml`, and merges in the new chart's defaults for any key you never set yourself:
+Most upgrades are a new BookOrbit release, which reaches you as a bumped `image.tag` default in a new chart version. Use `--reset-then-reuse-values` (Helm ≥ 3.14): it resets to the new chart's defaults, re-applies the values you supplied at install time (including `my-secrets.yaml`), and merges any `--set` overrides on top:
 
 ```bash
 VERSION=  # the new chart version
@@ -532,12 +532,14 @@ VERSION=  # the new chart version
 helm upgrade bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
   --version $VERSION \
   --namespace bookorbit \
-  --reuse-values
+  --reset-then-reuse-values
 ```
 
 Dry-run first with `--dry-run --debug` to see what changes. `helm rollback bookorbit -n bookorbit` reverts a bad upgrade.
 
-One caveat: `--reuse-values` preserves your overrides, so anything you pinned explicitly stays pinned. If you installed with `--set image.tag=...`, that value survives the upgrade and masks the chart's new default. Check with `helm get values bookorbit -n bookorbit` (careful, that prints your secret values to the terminal).
+Do **not** use `--reuse-values` for chart version upgrades. Despite the name, it re-renders using the *old* chart's coalesced values, old defaults included, so the new chart's bumped defaults (`image.tag`, `postgres.image.tag`) are silently discarded: you get the new chart version with the old images. Per `helm upgrade --help`, `--reuse-values` "reuse[s] the last release's values", while `--reset-then-reuse-values` "reset[s] the values to the ones built into the chart, appl[ies] the last release's values and merge[s] in any overrides". `--reuse-values` is only appropriate when re-running the *same* chart version to tweak one `--set` flag.
+
+One caveat applies to both flags: anything you pinned explicitly stays pinned. If you installed with `--set image.tag=...`, that value survives the upgrade and masks the chart's new default. Check with `helm get values bookorbit -n bookorbit` (careful, that prints your secret values to the terminal).
 
 ### Before upgrading, check the upstream release
 
@@ -577,7 +579,7 @@ Do this in one sitting, with the app down from start to finish. Step 2 is the po
    ```bash
    helm upgrade bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
      --version $VERSION \
-     --namespace bookorbit --reuse-values \
+     --namespace bookorbit --reset-then-reuse-values \
      --set replicaCount=0
    kubectl rollout status deploy/bookorbit-postgres -n bookorbit
    ```
@@ -601,7 +603,7 @@ Do this in one sitting, with the app down from start to finish. Step 2 is the po
 
    ```bash
    helm upgrade bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
-     --version $VERSION --namespace bookorbit --reuse-values \
+     --version $VERSION --namespace bookorbit --reset-then-reuse-values \
      --set replicaCount=1
    kubectl exec -n bookorbit deploy/bookorbit-postgres -- \
      psql -U bookorbit -d bookorbit -c 'select version();'
