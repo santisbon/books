@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "bookorbit.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   # Recreate is required: both PVCs use ReadWriteOnce and cannot be shared
   # across pods.
   strategy:

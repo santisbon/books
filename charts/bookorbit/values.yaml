@@ -1,7 +1,15 @@
+# Only 0 or 1 are meaningful. The books and data PVCs are ReadWriteOnce, which
+# binds each volume to one node, so a second replica landing on another node
+# stays Pending on FailedAttachVolume. See the HPA section of the README.
+# Set to 0 to hold the app down across a helm upgrade, e.g. for a consistent
+# backup or while restoring the database; a plain `kubectl scale` is undone by
+# the next upgrade.
+replicaCount: 1
+
 image:
   repository: ghcr.io/bookorbit/bookorbit
   pullPolicy: IfNotPresent
-  tag: "2.0.1"
+  tag: "2.3.0"
 
 imagePullSecrets: []
 
@@ -65,13 +73,17 @@ credentials:
   # Must contain keys: postgres-password, jwt-secret, setup-bootstrap-token
   existingSecret: ""
 
-# Bundled PostgreSQL. Uses pgvector/pgvector:pg16 to satisfy the vector
-# extension requirement. Set enabled=false to use an external database.
+# Bundled PostgreSQL. Uses pgvector/pgvector to satisfy the vector extension
+# requirement, tracking the major version upstream BookOrbit ships in its
+# docker-compose.yml. Set enabled=false to use an external database.
+# Changing the major version is not a drop-in edit: PostgreSQL cannot read a
+# data directory written by a different major version, so the pod will refuse
+# to start until the volume is dumped and restored. See the README.
 postgres:
   enabled: true
   image:
     repository: pgvector/pgvector
-    tag: pg16
+    tag: pg18
     pullPolicy: IfNotPresent
   user: bookorbit
   database: bookorbit

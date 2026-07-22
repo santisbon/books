@@ -22,6 +22,10 @@ By default it targets a Kubernetes cluster with the Ceph RBD storage class and G
 - [Data and backups](#data-and-backups)
   - [Backup](#backup)
   - [Restore](#restore)
+- [Upgrading](#upgrading)
+  - [Routine upgrade](#routine-upgrade)
+  - [Before upgrading, check the upstream release](#before-upgrading-check-the-upstream-release)
+  - [PostgreSQL major version upgrade](#postgresql-major-version-upgrade)
 - [Uninstall](#uninstall)
   - [Switching install source (e.g. local → MicroK8s registry → GHCR)](#switching-install-source-eg-local--microk8s-registry--ghcr)
   - [Cloudflare Tunnel cleanup](#cloudflare-tunnel-cleanup)
@@ -100,6 +104,8 @@ bash scripts/backup.sh
     && mv /tmp/kubeconfig-merged.yaml ~/.kube/config
   ```
 
+  If instead you reach the cluster through a wrapper that runs `kubectl` and `helm` on a node over SSH (so there is no workstation kubeconfig at all), substitute that wrapper for `kubectl` and `helm` in every command below. `scripts/backup.sh` has a `KUBECTL` environment variable for this. Two consequences worth knowing: files referenced by `-f` must be readable *on the node running the command*, not on your workstation, so install from an OCI reference with `--reuse-values` rather than a local chart directory and a local `-f my-secrets.yaml`; and any command piping local data in (`gunzip -c ... | kubectl exec -i`) only works if the wrapper passes stdin through.
+
 ## Install
 
 Run the script to generate `my-secrets.yaml` with random credentials as shown in the TL;DR section.
@@ -139,7 +145,8 @@ On first access BookOrbit will prompt for your `SETUP_BOOTSTRAP_TOKEN` to create
 
 | Value | Default | Description |
 |---|---|---|
-| `image.tag` | `"1.12.0"` | BookOrbit image tag |
+| `image.tag` | `"2.3.0"` | BookOrbit image tag |
+| `replicaCount` | `1` | App replicas. Only `0` or `1` are meaningful; set `0` to hold the app down across a `helm upgrade` |
 | `config.appUrl` | `""` | Required: full URL BookOrbit is served from |
 | `config.nodeMaxOldSpaceSize` | `1024` | Node.js heap limit in MB; keep below container memory limit to prevent OOM on memory-constrained nodes |
 | `process.puid` | `1000` | UID the BookOrbit process runs as |
@@ -155,6 +162,7 @@ On first access BookOrbit will prompt for your `SETUP_BOOTSTRAP_TOKEN` to create
 | `credentials.setupBootstrapToken` | `""` | Required: one-time setup token |
 | `credentials.existingSecret` | `""` | Use a pre-existing Secret instead |
 | `postgres.enabled` | `true` | Deploy bundled PostgreSQL |
+| `postgres.image.tag` | `pg18` | pgvector image tag. Changing the major version requires a dump and restore, see [Upgrading](#postgresql-major-version-upgrade) |
 | `postgres.host` | `""` | External DB host (when `postgres.enabled=false`) |
 | `persistence.books.storageClass` | `ceph-rbd` | StorageClass for the books PVC |
 | `persistence.books.size` | `10Gi` | Books PVC size |
@@ -171,7 +179,13 @@ On first access BookOrbit will prompt for your `SETUP_BOOTSTRAP_TOKEN` to create
 
 ### HPA
 
-HPA is not recommended for this setup. The workload is low and predictable (personal book tracker), so there are no traffic spikes to react to. In the case of a Raspberry Pi cluster, the nodes are memory-constrained. An unexpected scale-out adds another ~1.5 GiB pod and could destabilize the node it lands on. PostgreSQL is the real bottleneck anyway, so scaling BookOrbit replicas doesn't help when the single DB instance is under load. If you want crash resilience, a static `replicas: 2` with pod anti-affinity is simpler and more predictable than HPA on this hardware.
+HPA is not recommended for this setup, and with the chart's default storage it cannot work at all.
+
+The blocker is the volumes. The `books` and `data` PVCs are ReadWriteOnce, which binds each volume to a single node. A second app replica scheduled onto another node stays `Pending` on `FailedAttachVolume` forever. This is also why the Deployment uses the `Recreate` strategy: even a rolling update would deadlock, with the new pod waiting for a volume the old pod has not released yet. Pod anti-affinity makes this worse rather than better, since it forces the second replica onto a different node, guaranteeing the failure. Genuine multi-replica operation would need ReadWriteMany volumes (CephFS rather than Ceph RBD) *and* an application that tolerates concurrent instances sharing a library directory, which BookOrbit does not claim to.
+
+The workload does not call for it either. It is low and predictable (personal book tracker), so there are no traffic spikes to react to, and PostgreSQL is the real bottleneck anyway, so adding app replicas would not help when the single DB instance is under load. On memory-constrained nodes (e.g. a 4 GiB Raspberry Pi) an unexpected scale-out would add another ~1.5 GiB pod and could destabilize the node it lands on.
+
+For crash resilience, rely on the Deployment controller: if a node fails, the single replica is rescheduled and the RWO volume reattaches on the new node. That is a restart rather than a failover, so expect brief downtime instead of continuous availability. Use `replicaCount` as a `0`/`1` switch for maintenance, not as a scaling knob.
 
 ## Publishing the chart
 
@@ -382,10 +396,14 @@ aws s3 ls s3://bookorbit-backups/bookorbit/20260616T175400Z/ --profile <profile>
 **Consistency note:** The three archives are captured at different points in time. `pg_dump` is safe while the database is running (it takes a consistent snapshot via MVCC), but `tar` is not snapshot-aware. Files being written mid-backup may be captured in a partially-written state. More critically, if BookOrbit writes a new book to `/books` and its database record between the `pg_dump` and the `/books` tar, a restore would have the file but no record (or vice versa). For a home setup this is an acceptable trade-off; a library re-scan after restore will reconcile any mismatches. For a fully consistent backup, scale the deployment to zero first, back up, then scale back up (at the cost of downtime):
 
 ```bash
-kubectl scale deploy -n bookorbit --replicas=0 --all
+kubectl scale deploy/bookorbit -n bookorbit --replicas=0
 bash scripts/backup.sh
-kubectl scale deploy -n bookorbit --replicas=1 --all
+kubectl scale deploy/bookorbit -n bookorbit --replicas=1
 ```
+
+Anatomy of `bash scripts/backup.sh`: it runs `pg_dump` through `kubectl exec` into the PostgreSQL pod, then tars `/books` and `/data` through `kubectl exec` into a pod that has those volumes mounted — normally the running app pod. When the app is scaled to zero there is no app pod to exec into, so the script detects this and starts a short-lived `backup-helper` pod that mounts the two PVCs read-only, tars from there, and deletes it when done (the same pattern as `restore-helper.yaml` in [Restore](#restore); the RWO volumes are free because nothing else holds them).
+
+Two constraints follow. Scale only the app Deployment, not `--all`: PostgreSQL must stay up for `pg_dump` to have a pod to exec into. And if a `helm upgrade` might land while the app is held down, use `--set replicaCount=0` instead of `kubectl scale`, since an upgrade resets a plain scale.
 
 **Restore priority:** PostgreSQL is the only irreplaceable store; restore it first. `/books` can be restored from originals if you have them. Most of `/data` (extracted covers, author photos) can be regenerated by re-scanning the library; the only non-recoverable part is `cover_custom.*` files (covers manually uploaded through the UI).
 
@@ -501,6 +519,97 @@ kubectl scale deploy/bookorbit -n bookorbit --replicas=1
 ```
 
 This works because the app is at zero replicas, so the ReadWriteOnce `books` and `data` PVCs are free for the helper pod to attach.
+
+## Upgrading
+
+### Routine upgrade
+
+Most upgrades are a new BookOrbit release, which reaches you as a bumped `image.tag` default in a new chart version. `--reuse-values` carries forward everything you passed at install time, including `my-secrets.yaml`, and merges in the new chart's defaults for any key you never set yourself:
+
+```bash
+VERSION=  # the new chart version
+
+helm upgrade bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
+  --version $VERSION \
+  --namespace bookorbit \
+  --reuse-values
+```
+
+Dry-run first with `--dry-run --debug` to see what changes. `helm rollback bookorbit -n bookorbit` reverts a bad upgrade.
+
+One caveat: `--reuse-values` preserves your overrides, so anything you pinned explicitly stays pinned. If you installed with `--set image.tag=...`, that value survives the upgrade and masks the chart's new default. Check with `helm get values bookorbit -n bookorbit` (careful, that prints your secret values to the terminal).
+
+### Before upgrading, check the upstream release
+
+The chart's `appVersion` tracks the BookOrbit release in `image.tag`. Before bumping it, read the [release notes](https://github.com/bookorbit/bookorbit/releases) for anything that needs action on your side, and diff the upstream [compose file](https://github.com/bookorbit/bookorbit/blob/main/docker-compose.yml) against this chart's `values.yaml`. The compose file is where upstream declares the PostgreSQL image it develops against, and a change there is easy to miss because it usually lands as a routine `build(docker)` commit rather than a headline in the release notes.
+
+BookOrbit does not require the exact PostgreSQL major version upstream ships, so a mismatch is not urgent. Tracking it keeps you on the version that actually gets tested.
+
+### PostgreSQL major version upgrade
+
+Changing `postgres.image.tag` across a major version (`pg16` → `pg18`) is not a drop-in edit. PostgreSQL cannot read a data directory written by a different major version, so the new image will refuse to start on the existing PVC and the pod will crash-loop complaining that the database files are incompatible. The data has to leave through `pg_dump` and come back through `psql`, which is the same path the [Restore](#restore) section already describes.
+
+Your books and covers are not involved. Only the PostgreSQL PVC is replaced; `bookorbit-books` and `bookorbit-data` are untouched throughout.
+
+Do this in one sitting, with the app down from start to finish. Step 2 is the point of no return for the old volume.
+
+1. **Back up, and keep the dump local** so the restore does not depend on a download:
+
+   ```bash
+   bash scripts/backup.sh
+   bash scripts/download-backup.sh
+   TS=<timestamp>   # the directory the script just created
+   gunzip -t "$TS/postgres.sql.gz" && echo "dump readable"
+   ```
+
+2. **Stop everything, then discard the old volume.** Helm recreates the PVC empty on the next upgrade:
+
+   ```bash
+   kubectl scale deploy -n bookorbit --replicas=0 --all
+   kubectl wait --for=delete pod --all -n bookorbit --timeout=120s
+   kubectl delete pvc bookorbit-postgres -n bookorbit
+   ```
+
+   Here `--all` is correct and deliberate, unlike in the backup note above: nothing needs to exec into PostgreSQL at this point, and the volume cannot be deleted while a pod holds it.
+
+3. **Upgrade to the chart version carrying the new tag,** keeping the app down through the upgrade. PostgreSQL comes up on a fresh volume, which `initdb` initializes with the password from your `my-secrets.yaml`:
+
+   ```bash
+   helm upgrade bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
+     --version $VERSION \
+     --namespace bookorbit --reuse-values \
+     --set replicaCount=0
+   kubectl rollout status deploy/bookorbit-postgres -n bookorbit
+   ```
+
+   `replicaCount=0` matters. Left at 1, the app starts against the empty database and runs its migrations before you restore. Step 4 would still overwrite that, but there is no reason to let the app touch a database you are about to replace.
+
+4. **Restore the dump.** The dump is a plain SQL dump with no `DROP`/`CREATE DATABASE`, so clear the schema `initdb` left behind and stream it in. `psql` connects over the local socket, which `pg_hba.conf` trusts, so no password is needed:
+
+   ```bash
+   kubectl exec -i -n bookorbit deploy/bookorbit-postgres -- \
+     psql -U bookorbit -d bookorbit -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+
+   gunzip -c "$TS/postgres.sql.gz" \
+     | kubectl exec -i -n bookorbit deploy/bookorbit-postgres -- \
+         psql -U bookorbit -d bookorbit -v ON_ERROR_STOP=1
+   ```
+
+   The dump recreates the `vector` extension it needs, and the `pgvector` image ships the same extension series across PostgreSQL majors, so it restores without a version pin.
+
+5. **Bring the app back up and verify:**
+
+   ```bash
+   helm upgrade bookorbit oci://ghcr.io/santisbon/charts/bookorbit \
+     --version $VERSION --namespace bookorbit --reuse-values \
+     --set replicaCount=1
+   kubectl exec -n bookorbit deploy/bookorbit-postgres -- \
+     psql -U bookorbit -d bookorbit -c 'select version();'
+   ```
+
+   Then check the UI: book count, covers, and that your session survived.
+
+**Rollback** is to set `postgres.image.tag` back to the old major, delete the PVC again, and restore the same dump. That is why step 1 keeps a local copy.
 
 ## Uninstall
 

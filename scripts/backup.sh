@@ -43,13 +43,53 @@ $KUBECTL exec -n "$NAMESPACE" deploy/bookorbit-postgres \
 
 NICE_TAR='IONICE=""; command -v ionice >/dev/null 2>&1 && IONICE="ionice -c3"; exec nice -n 19 $IONICE tar'
 
+# The /books and /data archives are tarred inside a pod that has the volumes
+# mounted. Normally that is the running app pod. If the app is scaled to zero
+# (quiesced for a fully consistent backup), exec has no pod to target and
+# would hang until timeout, so start a short-lived backup-helper pod that
+# mounts the two PVCs instead. The RWO volumes are free to attach because
+# nothing else is using them. Mirrors restore-helper.yaml in the README.
+FILES_TARGET="deploy/bookorbit"
+REPLICAS=$($KUBECTL get deploy/bookorbit -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
+if [[ "$REPLICAS" == "0" ]]; then
+  echo "App is scaled to zero; starting backup-helper pod to read the volumes..."
+  cleanup() {
+    $KUBECTL delete pod backup-helper -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+  }
+  trap cleanup EXIT
+  $KUBECTL apply -n "$NAMESPACE" -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: backup-helper
+spec:
+  restartPolicy: Never
+  containers:
+    - name: helper
+      image: busybox
+      command: ["sleep", "3600"]
+      volumeMounts:
+        - { name: books, mountPath: /books, readOnly: true }
+        - { name: data, mountPath: /data, readOnly: true }
+  volumes:
+    - name: books
+      persistentVolumeClaim:
+        claimName: bookorbit-books
+    - name: data
+      persistentVolumeClaim:
+        claimName: bookorbit-data
+EOF
+  $KUBECTL wait --for=condition=Ready pod/backup-helper -n "$NAMESPACE" --timeout=120s
+  FILES_TARGET="pod/backup-helper"
+fi
+
 echo "→ /books..."
-$KUBECTL exec -n "$NAMESPACE" deploy/bookorbit \
+$KUBECTL exec -n "$NAMESPACE" "$FILES_TARGET" \
   -- sh -c "$NICE_TAR czf - -C / --exclude=lost+found books" \
   | $S3CP - "s3://$BUCKET/$PREFIX/books.tar.gz"
 
 echo "→ /data..."
-$KUBECTL exec -n "$NAMESPACE" deploy/bookorbit \
+$KUBECTL exec -n "$NAMESPACE" "$FILES_TARGET" \
   -- sh -c "$NICE_TAR czf - -C / --exclude=lost+found data" \
   | $S3CP - "s3://$BUCKET/$PREFIX/data.tar.gz"
 

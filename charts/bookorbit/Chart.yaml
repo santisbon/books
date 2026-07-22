@@ -2,8 +2,8 @@ apiVersion: v2
 name: bookorbit
 description: Helm chart for BookOrbit, a self-hosted book management application
 type: application
-version: 0.1.1
-appVersion: "latest"
+version: 0.2.0
+appVersion: "2.3.0"
 keywords:
   - books
   - library
