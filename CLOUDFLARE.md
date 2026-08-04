@@ -74,7 +74,7 @@ The practical effect is that losing any single Pi does not interrupt internet ac
 
 ### Path 1 — Local network (HTTPRoute + Traefik)
 
-The existing `HTTPRoute` resource routes traffic from Traefik's Gateway (`traefik-gateway` in the `ingress` namespace) to BookOrbit. This path is used when you access BookOrbit from inside your home network, typically via a local DNS entry like `books.node-01.local`.
+The existing `HTTPRoute` resource routes traffic from Traefik's Gateway (`traefik-gateway` in the `ingress` namespace) to BookOrbit. This path is used when you access BookOrbit from inside your home network, typically via a local DNS entry like `books.example.local`.
 
 ```
 Browser (local network)
@@ -162,7 +162,8 @@ After packaging the chart and pushing it to the desired registry:
 
 ```sh
 # from the MicroK8s built-in registry
-CHART="oci://node-01.local:32000/charts/bookorbit"
+NODE=  # host name or LAN IP of any cluster node
+CHART="oci://$NODE:32000/charts/bookorbit"
 # or from the GHCR
 CHART="oci://ghcr.io/<github-user>/charts/bookorbit"
 VERSION= # choose a version to deploy

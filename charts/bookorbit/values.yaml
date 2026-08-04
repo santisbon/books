@@ -44,24 +44,27 @@ httpRoute:
     - name: traefik-gateway
       namespace: ingress
   hostnames: []
-  # - books.node-01.local
+  # - books.example.local
 
 # Application config
 config:
-  # Required: full URL where BookOrbit will be accessed (e.g. http://books.node-01.local)
+  # Required: full URL where BookOrbit will be accessed (e.g. http://books.example.local)
   appUrl: ""
   logLevel: info
-  # Node.js heap limit in MB. On 4 GiB Raspberry Pis the default of 2048 allows
-  # Node.js to consume enough memory during large PDF/metadata processing to
-  # trigger the kernel OOM killer, which starves the Ceph OSD of memory and
-  # causes it to lose its monitor heartbeat and go down. 512 keeps the heap
-  # well under the container memory limit below, leaving room for the
-  # ffmpeg/ffprobe child processes metadata embedding spawns in the same
-  # cgroup. (Previously 1024/1536Mi: that pairing let the process reach only
-  # ~622MB RSS before a global, node-wide OOM hit first — node-02's Ceph
-  # daemons run outside Kubernetes and aren't reserved for in kubelet's
-  # accounting, so real headroom is much less than the limit implied.)
-  nodeMaxOldSpaceSize: 512
+  # Node.js heap limit in MB. Keep it below the container memory limit below,
+  # leaving room for the ffmpeg/ffprobe child processes metadata embedding
+  # spawns in the same cgroup.
+  #
+  # On memory-constrained nodes (e.g. 4 GiB Raspberry Pis) 2048 allows Node.js
+  # to consume enough memory during large PDF/metadata processing to trigger
+  # the kernel OOM killer, which starves the Ceph OSD of memory and causes it
+  # to lose its monitor heartbeat and go down. Override with 512 there, paired
+  # with a 768Mi limit. (1024/1536Mi was also tried and is not enough: that
+  # pairing let the process reach only ~622MB RSS before a global, node-wide
+  # OOM hit first — those nodes' Ceph daemons run outside Kubernetes and aren't
+  # reserved for in kubelet's accounting, so real headroom is much less than
+  # the limit implies.)
+  nodeMaxOldSpaceSize: 2048
 
 # Credentials. Set at install time with --set or -f my-values.yaml.
 # Do not commit values containing these to source control.
@@ -121,19 +124,22 @@ cloudflare:
     pullPolicy: IfNotPresent
 
 # Without limits this pod runs as BestEffort (oom_score_adj=1000), making it
-# the first thing the kernel kills under memory pressure. On 4 GiB Pis, large
-# PDF/metadata saves push Node.js's RSS up, and node-02's Ceph mon/mgr/osd
-# daemons run outside Kubernetes (not reserved for in kubelet's allocatable
+# the first thing the kernel kills under memory pressure.
+#
+# On memory-constrained nodes (e.g. 4 GiB Raspberry Pis) drop these to
+# 768Mi/512Mi and set config.nodeMaxOldSpaceSize to 512. Large PDF/metadata
+# saves push Node.js's RSS up, and on those nodes the Ceph mon/mgr/osd daemons
+# run outside Kubernetes (not reserved for in kubelet's allocatable
 # accounting), so real free memory is well below what the node reports as
-# available. 768Mi keeps this container's own cgroup limit as the thing that
-# trips a memory spike (clean OOMKilled + pod restart) instead of a node-wide
-# OOM that can take out the Ceph OSD sharing the box.
+# available. A tight limit keeps this container's own cgroup limit as the thing
+# that trips on a memory spike (clean OOMKilled + pod restart) instead of a
+# node-wide OOM that can take out the Ceph OSD sharing the box.
 resources:
   limits:
-    memory: 768Mi  # headroom above nodeMaxOldSpaceSize (512Mi heap + overhead)
+    memory: 3Gi  # headroom above nodeMaxOldSpaceSize (2048MB heap + overhead)
   requests:
     cpu: 250m
-    memory: 512Mi
+    memory: 1Gi
 
 livenessProbe:
   httpGet:

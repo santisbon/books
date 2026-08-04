@@ -1,6 +1,6 @@
 # Books
 
-Helm chart for [BookOrbit](https://bookorbit.app), a self-hosted e-book management application. Great for a homelab running [MicroK8s](https://canonical.com/microk8s) + [MicroCeph](https://canonical.com/microk8s/docs/how-to-ceph) on a [Raspberry Pi](https://www.raspberrypi.com/products/) cluster.
+Helm chart for [BookOrbit](https://bookorbit.app), a self-hosted e-book management application. Great for a homelab running [MicroK8s](https://canonical.com/microk8s) + [MicroCeph](https://canonical.com/microk8s/docs/how-to-ceph) cluster.
 
 By default it targets a Kubernetes cluster with the Ceph RBD storage class and Gateway API HTTPRoute ingress. It supports optional access from the internet via a [Cloudflare Tunnel](CLOUDFLARE.md).
 
@@ -87,11 +87,14 @@ bash scripts/backup.sh
 - Helm
 - A Kubernetes cluster with `gateway.networking.k8s.io` CRDs and a provisioned Gateway (the MicroK8s `ingress` addon satisfies both, providing a `traefik-gateway` Gateway in the `ingress` namespace)
 - A StorageClass for the data PVCs (defaults to `ceph-rbd`; set `persistence.books.storageClass`, `persistence.data.storageClass`, and `postgres.persistence.storageClass` to use a different one)
-- A kubeconfig pointing at the cluster. If you're running Helm from a machine that is not a cluster node, copy the kubeconfig from any node and replace the loopback address with the node's LAN IP or host name. If your cluster node user is `ubuntu` and a node is `node-01.local`:
+- A kubeconfig pointing at the cluster. If you're running Helm from a machine that is not a cluster node, copy the kubeconfig from any node and replace the loopback address with the node's LAN IP or host name. Set `NODE` to that node and `NODE_USER` to the login user on it (`ubuntu` on a stock MicroK8s install):
 
   ```bash
-  ssh ubuntu@node-01.local "microk8s config" \
-    | sed 's/127.0.0.1/node-01.local/' \
+  NODE=       # host name or LAN IP of any cluster node
+  NODE_USER=ubuntu
+
+  ssh $NODE_USER@$NODE "microk8s config" \
+    | sed "s/127.0.0.1/$NODE/" \
     > ~/.kube/microk8s.yaml
   export KUBECONFIG=~/.kube/microk8s.yaml
   ```
@@ -148,12 +151,12 @@ On first access BookOrbit will prompt for your `SETUP_BOOTSTRAP_TOKEN` to create
 | `image.tag` | `"2.3.0"` | BookOrbit image tag |
 | `replicaCount` | `1` | App replicas. Only `0` or `1` are meaningful; set `0` to hold the app down across a `helm upgrade` |
 | `config.appUrl` | `""` | Required: full URL BookOrbit is served from |
-| `config.nodeMaxOldSpaceSize` | `1024` | Node.js heap limit in MB; keep below container memory limit to prevent OOM on memory-constrained nodes |
+| `config.nodeMaxOldSpaceSize` | `2048` | Node.js heap limit in MB; keep below the container memory limit. Override to `512` on memory-constrained nodes, see [Low-powered nodes](#low-powered-nodes) |
 | `process.puid` | `1000` | UID the BookOrbit process runs as |
 | `process.pgid` | `1000` | GID the BookOrbit process runs as (also sets `fsGroup`) |
-| `resources.limits.memory` | `1536Mi` | Container memory limit; prevents system OOM on memory-constrained nodes (e.g. 4 GiB Raspberry Pi) |
+| `resources.limits.memory` | `3Gi` | Container memory limit; prevents a node-wide OOM. Override to `768Mi` on memory-constrained nodes, see [Low-powered nodes](#low-powered-nodes) |
 | `resources.requests.cpu` | `250m` | CPU request |
-| `resources.requests.memory` | `512Mi` | Memory request |
+| `resources.requests.memory` | `1Gi` | Memory request. Override to `512Mi` on memory-constrained nodes, see [Low-powered nodes](#low-powered-nodes) |
 | `httpRoute.enabled` | `true` | Create the Gateway API HTTPRoute for local network access |
 | `httpRoute.parentRefs` | `traefik-gateway / ingress` | Gateway the HTTPRoute attaches to |
 | `httpRoute.hostnames` | `[]` | Hostnames to match (empty = all) |
@@ -177,13 +180,31 @@ On first access BookOrbit will prompt for your `SETUP_BOOTSTRAP_TOKEN` to create
 | `cloudflare.image.tag` | `"2026.6.1"` | cloudflared image tag |
 
 
+### Low-powered nodes
+
+The memory defaults assume a node with several GiB to spare. On memory-constrained nodes such as a 4 GiB Raspberry Pi, override them:
+
+```yaml
+config:
+  nodeMaxOldSpaceSize: 512
+resources:
+  limits:
+    memory: 768Mi
+  requests:
+    memory: 512Mi
+```
+
+Two things make the smaller node different. Large PDF and metadata saves push Node.js's RSS up, and the ffmpeg/ffprobe child processes that metadata embedding spawns share the same cgroup. At the same time, if the node also runs Ceph mon/mgr/osd daemons outside Kubernetes, that memory is not reserved for in kubelet's allocatable accounting, so real free memory is well below what the node reports as available.
+
+The goal of the tighter pairing is to make this container's own cgroup limit the thing that trips on a memory spike, producing a clean `OOMKilled` and pod restart, rather than a node-wide OOM that can take out the Ceph OSD sharing the box. `1024`/`1536Mi` was tried and is not enough: the process reached only ~622 MB RSS before the global OOM hit first.
+
 ### HPA
 
 HPA is not recommended for this setup, and with the chart's default storage it cannot work at all.
 
 The blocker is the volumes. The `books` and `data` PVCs are ReadWriteOnce, which binds each volume to a single node. A second app replica scheduled onto another node stays `Pending` on `FailedAttachVolume` forever. This is also why the Deployment uses the `Recreate` strategy: even a rolling update would deadlock, with the new pod waiting for a volume the old pod has not released yet. Pod anti-affinity makes this worse rather than better, since it forces the second replica onto a different node, guaranteeing the failure. Genuine multi-replica operation would need ReadWriteMany volumes (CephFS rather than Ceph RBD) *and* an application that tolerates concurrent instances sharing a library directory, which BookOrbit does not claim to.
 
-The workload does not call for it either. It is low and predictable (personal book tracker), so there are no traffic spikes to react to, and PostgreSQL is the real bottleneck anyway, so adding app replicas would not help when the single DB instance is under load. On memory-constrained nodes (e.g. a 4 GiB Raspberry Pi) an unexpected scale-out would add another ~1.5 GiB pod and could destabilize the node it lands on.
+The workload does not call for it either. It is low and predictable (personal book tracker), so there are no traffic spikes to react to, and PostgreSQL is the real bottleneck anyway, so adding app replicas would not help when the single DB instance is under load. On memory-constrained nodes (e.g. a 4 GiB Raspberry Pi) an unexpected scale-out would add another pod sized by `resources.limits.memory` and could destabilize the node it lands on.
 
 For crash resilience, rely on the Deployment controller: if a node fails, the single replica is rescheduled and the RWO volume reattaches on the new node. That is a restart rather than a failover, so expect brief downtime instead of continuous availability. Use `replicaCount` as a `0`/`1` switch for maintenance, not as a scaling knob.
 
@@ -203,31 +224,35 @@ helm package charts/bookorbit
 
 #### MicroK8s built-in registry
 
-The MicroK8s registry addon exposes an unauthenticated registry on port 32000 on every node. Use any node's LAN IP or host name to reach it from your laptop.
+The MicroK8s registry addon exposes an unauthenticated registry on port 32000 on every node. Set `NODE` to any cluster node's host name or LAN IP to reach it from your laptop:
+
+```bash
+NODE=  # e.g. the host name of any node in your cluster
+```
 
 ```bash
 # Push (Helm 3.8+)
-helm push bookorbit-*.tgz oci://node-01.local:32000/charts --plain-http
+helm push bookorbit-*.tgz oci://$NODE:32000/charts --plain-http
 ```
 
 View published charts:
 
 ```bash
 # List all repositories in the registry
-curl -s http://node-01.local:32000/v2/_catalog | jq
+curl -s http://$NODE:32000/v2/_catalog | jq
 
 # List available versions of the chart
-curl -s http://node-01.local:32000/v2/charts/bookorbit/tags/list | jq
+curl -s http://$NODE:32000/v2/charts/bookorbit/tags/list | jq
 
 # Inspect chart metadata for a specific version
-helm show chart oci://node-01.local:32000/charts/bookorbit --version $VERSION --plain-http
+helm show chart oci://$NODE:32000/charts/bookorbit --version $VERSION --plain-http
 ```
 
 Install directly from it:
 
 *To make BookOrbit available from the internet, see `CLOUDFLARE.md`.*
 ```bash
-helm upgrade --install bookorbit oci://node-01.local:32000/charts/bookorbit \
+helm upgrade --install bookorbit oci://$NODE:32000/charts/bookorbit \
   --version $VERSION --plain-http \
   --namespace bookorbit --create-namespace \
   --set config.appUrl="http://books.internal" \
@@ -719,6 +744,7 @@ kubectl delete pod -n bookorbit -l app.kubernetes.io/name=bookorbit
 - **`pg_dump`** — PostgreSQL's built-in logical backup utility, used by the backup script.
 - **PVC** — PersistentVolumeClaim, a Kubernetes request for storage bound to a StorageClass. This chart provisions three.
 - **RGW** — RADOS Gateway, Ceph's S3-compatible object storage interface, used as the backup destination.
+- **RSS** — Resident Set Size, the portion of a process's memory actually held in physical RAM. It is what the container's memory limit is enforced against and what the OOM killer counts, and it is larger than the V8 heap capped by `config.nodeMaxOldSpaceSize`, since it also covers the Node binary, native buffers, and any child processes in the same cgroup.
 - **S3** — Amazon's Simple Storage Service API, and by extension any S3-compatible object store (like Ceph RGW).
 - **StorageClass** — A Kubernetes resource that defines how PersistentVolumes are dynamically provisioned (e.g. `ceph-rbd`).
 - **TLS / HTTPS** — Transport Layer Security, the encryption protocol behind HTTPS. Cloudflare provides this automatically for the tunnel path.
