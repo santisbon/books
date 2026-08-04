@@ -1,6 +1,6 @@
 # Cloudflare Tunnel Integration
 
-This document explains how the Cloudflare Tunnel integration works, how it relates to the existing local-network access path, and how to reason about both. When discussing a deployment environment it uses a 3-node Raspberry Pi cluster as an example.
+This document explains how the Cloudflare Tunnel integration works, how it relates to the existing local-network access path, and how to reason about both. When discussing a deployment environment it uses a 3-node cluster as an example.
 
 ## Table of Contents
 
