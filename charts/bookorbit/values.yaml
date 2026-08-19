@@ -9,7 +9,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/bookorbit/bookorbit
   pullPolicy: IfNotPresent
-  tag: "2.5.0"
+  tag: "2.6.0"
 
 imagePullSecrets: []
 

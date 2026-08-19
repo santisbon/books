@@ -148,7 +148,7 @@ On first access BookOrbit will prompt for your `SETUP_BOOTSTRAP_TOKEN` to create
 
 | Value | Default | Description |
 |---|---|---|
-| `image.tag` | `"2.5.0"` | BookOrbit image tag |
+| `image.tag` | `"2.6.0"` | BookOrbit image tag |
 | `replicaCount` | `1` | App replicas. Only `0` or `1` are meaningful; set `0` to hold the app down across a `helm upgrade` |
 | `config.appUrl` | `""` | Required: full URL BookOrbit is served from |
 | `config.nodeMaxOldSpaceSize` | `2048` | Node.js heap limit in MB; keep below the container memory limit. Override to `512` on memory-constrained nodes, see [Low-powered nodes](#low-powered-nodes) |
